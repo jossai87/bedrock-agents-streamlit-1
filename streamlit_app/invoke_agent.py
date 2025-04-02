@@ -4,7 +4,6 @@ import base64
 import io
 import sys
 import boto3
-import requests
 
 from boto3.session import Session
 from botocore.auth import SigV4Auth
@@ -13,42 +12,9 @@ from botocore.credentials import Credentials
 from requests import request
 
 # ---------------------------------------------------------------------
-# REGION CONFIGURATION - Dynamic detection with fallback:
+# REGION CONFIGURATION:
 # ---------------------------------------------------------------------
-def get_current_region():
-    """
-    Attempt to dynamically determine the current AWS region with multiple fallback options.
-    """
-    # Try to get region from instance metadata (works on EC2)
-    try:
-        r = requests.get('http://169.254.169.254/latest/meta-data/placement/region', timeout=0.5)
-        if r.status_code == 200:
-            return r.text
-    except:
-        pass
-    
-    # Try to get region from environment variables
-    if 'AWS_REGION' in os.environ:
-        return os.environ['AWS_REGION']
-    if 'AWS_DEFAULT_REGION' in os.environ:
-        return os.environ['AWS_DEFAULT_REGION']
-    
-    # Try to get region from boto3 session
-    try:
-        session = boto3.session.Session()
-        if session.region_name:
-            return session.region_name
-    except:
-        pass
-    
-    # Default to us-west-2 if all else fails
-    return "us-west-2"
-
-# Set the region dynamically
-theRegion = get_current_region()
-print(f"Using AWS region: {theRegion}")
-
-# Set environment variable for other AWS services
+theRegion = "us-west-2"
 os.environ["AWS_REGION"] = theRegion
 
 # Configure boto3 to use the specified region
@@ -115,7 +81,7 @@ def sigv4_request(
         The HTTP response (requests.Response object).
     """
     if region is None:
-        region = theRegion
+        region = os.environ.get("AWS_REGION", "us-west-2")
     if credentials is None:
         credentials = get_frozen_credentials()
 
