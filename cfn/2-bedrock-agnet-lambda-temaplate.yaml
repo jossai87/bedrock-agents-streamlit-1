@@ -1,7 +1,19 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: CloudFormation template to create an AWS Bedrock Agent resource and Lambda function.
+Description: CloudFormation template to create an AWS Bedrock Agent resource and Lambda function with SQLite database.
 
 Resources:
+  # S3 Bucket to store Lambda deployment packages and database file
+  LambdaCodeBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Status: Enabled
+            ExpirationInDays: 7
+            NoncurrentVersionExpirationInDays: 1
+
   # IAM Managed Policy for CloudWatch Logs
   CloudWatchLogsPolicy:
     Type: 'AWS::IAM::ManagedPolicy'
@@ -15,6 +27,22 @@ Resources:
               - 'logs:CreateLogStream'
               - 'logs:PutLogEvents'
             Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*:*"
+
+  # S3 Access Policy for Lambda
+  S3AccessPolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:GetObject'
+              - 's3:PutObject'
+              - 's3:ListBucket'
+            Resource: 
+              - !Sub 'arn:aws:s3:::${LambdaCodeBucket}'
+              - !Sub 'arn:aws:s3:::${LambdaCodeBucket}/*'
 
   # IAM Role for Lambda Function Execution
   LambdaExecutionRole:
@@ -30,6 +58,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AWSLambdaExecute
         - !Ref CloudWatchLogsPolicy
+        - !Ref S3AccessPolicy
       Policies:
         - PolicyName: 'LambdaCustomPolicy'
           PolicyDocument:
@@ -39,6 +68,22 @@ Resources:
                 Action:
                   - 'sqs:SendMessage'
                 Resource: !GetAtt ActionCallDLQ.Arn
+
+  # IAM Role for DB Creator Lambda
+  DBCreatorLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+        - !Ref CloudWatchLogsPolicy
+        - !Ref S3AccessPolicy
 
   # IAM Managed Policy for Lambda Invocation
   LambdaInvokePolicy:
@@ -73,9 +118,337 @@ Resources:
     Properties:
       QueueName: !Sub "ActionCallDLQ-${AWS::AccountId}-${AWS::Region}"
 
+  # Lambda Function to create SQLite database
+  DBCreatorFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt DBCreatorLambdaRole.Arn
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import json
+          import sqlite3
+          import random
+          import boto3
+          import os
+          import cfnresponse
+          
+          def lambda_handler(event, context):
+            response_data = {}
+            try:
+                # Skip processing if this is a delete event
+                if event['RequestType'] == 'Delete':
+                    cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                    return
+                    
+                print("Creating company database...")
+                
+                # Create database file locally
+                db_file = '/tmp/company_database.db'
+                conn = sqlite3.connect(db_file)
+                c = conn.cursor()
+                
+                # Create just the companies table
+                c.execute('''CREATE TABLE IF NOT EXISTS companies
+                          (company_id INTEGER PRIMARY KEY, company_name TEXT, industry_sector TEXT, revenue INTEGER, expenses INTEGER, profit INTEGER, employees INTEGER)''')
+                
+                # Generate company data dynamically
+                # Define possible industry sectors
+                industry_sectors = [
+                    "Technology", "Real Estate", "Healthcare", "Finance", "Energy", 
+                    "Retail", "Manufacturing", "Telecommunications", "Entertainment",
+                    "Transportation", "Food & Beverage", "Agriculture"
+                ]
+                
+                # Define name components for generating company names
+                prefixes = [
+                    "Tech", "Global", "Advanced", "Eco", "Smart", "Future", "Innovative", 
+                    "Digital", "Cyber", "Quantum", "Elite", "Prime", "Strategic", "Dynamic",
+                    "Next", "Modern", "Integrated", "Creative", "Precision", "Universal"
+                ]
+                
+                middles = [
+                    "Solutions", "Systems", "Analytics", "Data", "Vision", "Nexus", "Core",
+                    "Edge", "Cloud", "Matrix", "Network", "Logic", "Mind", "Drive",
+                    "Wave", "Sphere", "Link", "Pulse", "Stream", "Connect"
+                ]
+                
+                suffixes = [
+                    "Inc.", "Corp", "Technologies", "Group", "Partners", "Enterprises",
+                    "Industries", "Holdings", "International", "Associates", "Ventures",
+                    "Alliance", "Global", "Innovations", "Solutions", "Systems"
+                ]
+                
+                # Generate 100 companies (more data)
+                used_names = set()  # To ensure unique names
+                
+                for i in range(1, 101):
+                    # Generate unique company name
+                    while True:
+                        if random.random() < 0.5:  # 50% chance of 2-part name
+                            name = f"{random.choice(prefixes)}{random.choice(middles)} {random.choice(suffixes)}"
+                        else:  # 50% chance of 3-part name
+                            name = f"{random.choice(prefixes)}{random.choice(middles)}{random.choice(suffixes)}"
+                        
+                        if name not in used_names:
+                            used_names.add(name)
+                            break
+                    
+                    # Select an industry sector
+                    industry = random.choice(industry_sectors)
+                    
+                    # Generate financial data with realistic constraints
+                    # Companies in different sectors have different ranges of revenue
+                    if industry in ["Technology", "Finance", "Healthcare"]:
+                        revenue = random.randint(50000, 500000)
+                    elif industry in ["Real Estate", "Energy"]:
+                        revenue = random.randint(70000, 300000)
+                    else:
+                        revenue = random.randint(20000, 150000)
+                        
+                    # Expenses generally correlate with revenue but vary by industry
+                    if industry in ["Manufacturing", "Energy"]:
+                        # Higher cost industries
+                        expense_factor = random.uniform(0.4, 0.7)
+                    elif industry in ["Technology", "Finance"]:
+                        # Higher margin industries
+                        expense_factor = random.uniform(0.2, 0.5)
+                    else:
+                        # Average industries
+                        expense_factor = random.uniform(0.3, 0.6)
+                        
+                    expenses = int(revenue * expense_factor)
+                    profit = revenue - expenses
+                    
+                    # Employee count varies by industry and revenue
+                    employees = int((revenue / random.randint(5000, 15000)) + random.randint(5, 30))
+                    
+                    c.execute("""
+                        INSERT INTO companies (company_id, company_name, industry_sector, revenue, expenses, profit, employees) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            i, 
+                            name, 
+                            industry, 
+                            revenue, 
+                            expenses, 
+                            profit, 
+                            employees
+                        )
+                    )
+                
+                # Commit the changes and close the connection
+                conn.commit()
+                conn.close()
+                
+                print("Database created successfully, uploading to S3...")
+                
+                # Upload the database file to S3
+                s3 = boto3.client('s3')
+                bucket_name = event['ResourceProperties']['BucketName']
+                s3.upload_file(db_file, bucket_name, 'company_database.db')
+                
+                response_data['Message'] = 'Database created and uploaded to S3 successfully'
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+            except Exception as e:
+                print(f"Error: {str(e)}")
+                response_data['Error'] = str(e)
+                cfnresponse.send(event, context, cfnresponse.FAILED, response_data)
+
+  # Custom resource to trigger DB creation
+  DBCreatorCustomResource:
+    Type: 'Custom::DBCreator'
+    DependsOn: LambdaCodeBucket
+    Properties:
+      ServiceToken: !GetAtt DBCreatorFunction.Arn
+      BucketName: !Ref LambdaCodeBucket
+
+  # Lambda Function for Action Call with DB integration
+  ActionCallCodeUpload:
+    Type: 'Custom::LambdaCodeUpload'
+    DependsOn: DBCreatorCustomResource  # Ensure DB is created first
+    Properties:
+      ServiceToken: !GetAtt CodeUploaderFunction.Arn
+      BucketName: !Ref LambdaCodeBucket
+      LambdaCode: |
+        import json
+        import sqlite3
+        import os
+        import boto3
+
+        # Use the database file that's packaged directly with the Lambda code
+        DB_FILE_PATH = 'company_database.db'
+
+        def lambda_handler(event, context):
+            print(event)
+            
+            # Connect to the SQLite database that's included in the package
+            conn = sqlite3.connect(DB_FILE_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            def get_named_parameter(event, name):
+                return next(item for item in event['parameters'] if item['name'] == name)['value']
+        
+            def companyResearch(event):
+                company_name = get_named_parameter(event, 'name').lower()
+                print("NAME PRINTED: ", company_name)
+                
+                # Direct query with case-insensitive search using LOWER function
+                cursor.execute("SELECT * FROM companies WHERE LOWER(company_name) = ?", (company_name,))
+                row = cursor.fetchone()
+                
+                if row:
+                    row_dict = dict(row)
+                    return {
+                        "companyId": row_dict["company_id"],
+                        "companyName": row_dict["company_name"],
+                        "industrySector": row_dict["industry_sector"],
+                        "revenue": row_dict["revenue"],
+                        "expenses": row_dict["expenses"],
+                        "profit": row_dict["profit"],
+                        "employees": row_dict["employees"]
+                    }
+                
+                return None
+            
+            def createPortfolio(event):
+                num_companies = int(get_named_parameter(event, 'numCompanies'))
+                industry = get_named_parameter(event, 'industry').lower()
+
+                # Direct query with case-insensitive search and sorting
+                cursor.execute("""
+                    SELECT * FROM companies 
+                    WHERE LOWER(industry_sector) = ? 
+                    ORDER BY profit DESC 
+                    LIMIT ?
+                """, (industry, num_companies))
+                
+                rows = cursor.fetchall()
+                
+                companies = []
+                for row in rows:
+                    row_dict = dict(row)
+                    companies.append({
+                        "companyId": row_dict["company_id"],
+                        "companyName": row_dict["company_name"],
+                        "industrySector": row_dict["industry_sector"],
+                        "revenue": row_dict["revenue"],
+                        "expenses": row_dict["expenses"],
+                        "profit": row_dict["profit"],
+                        "employees": row_dict["employees"]
+                    })
+                
+                return companies
+        
+            def sendEmail(event):
+                email_address = get_named_parameter(event, 'emailAddress')
+                fomc_summary = get_named_parameter(event, 'fomcSummary')
+            
+                # Retrieve the portfolio data as a string
+                portfolio_data_string = get_named_parameter(event, 'portfolio')
+            
+                # Count companies in the database
+                cursor.execute("SELECT COUNT(*) as count FROM companies")
+                company_count = cursor.fetchone()['count']
+                
+                return f"Email sent successfully to {email_address} with portfolio information and FOMC summary. Database contains {company_count} companies."
+              
+            result = ''
+            response_code = 200
+            action_group = event['actionGroup']
+            api_path = event['apiPath']
+            
+            print("api_path: ", api_path)
+            
+            if api_path == '/companyResearch':
+                result = companyResearch(event)
+            elif api_path == '/createPortfolio':
+                result = createPortfolio(event)
+            elif api_path == '/sendEmail':
+                result = sendEmail(event)
+            else:
+                response_code = 404
+                result = f"Unrecognized api path: {action_group}::{api_path}"
+                
+            # Close the database connection
+            conn.close()
+                
+            response_body = {
+                'application/json': {
+                    'body': result
+                }
+            }
+                
+            action_response = {
+                'actionGroup': event['actionGroup'],
+                'apiPath': event['apiPath'],
+                'httpMethod': event['httpMethod'],
+                'httpStatusCode': response_code,
+                'responseBody': response_body
+            }
+
+            api_response = {'messageVersion': '1.0', 'response': action_response}
+            return api_response
+
+  # Lambda function to upload code to S3
+  CodeUploaderFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt DBCreatorLambdaRole.Arn
+      Runtime: python3.12
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import base64
+          import io
+          import zipfile
+
+          def lambda_handler(event, context):
+              response_data = {}
+              try:
+                  if event['RequestType'] in ['Create', 'Update']:
+                      s3 = boto3.client('s3')
+                      bucket_name = event['ResourceProperties']['BucketName']
+                      lambda_code = event['ResourceProperties']['LambdaCode']
+                      
+                      # Download the database file from S3
+                      try:
+                          s3.download_file(bucket_name, 'company_database.db', '/tmp/company_database.db')
+                          print("Database file downloaded successfully")
+                      except Exception as e:
+                          print(f"Error downloading database file: {str(e)}")
+                          raise
+                      
+                      # Create zip file in memory
+                      zip_buffer = io.BytesIO()
+                      with zipfile.ZipFile(zip_buffer, 'a') as zip_file:
+                          zip_file.writestr('index.py', lambda_code)
+                          zip_file.write('/tmp/company_database.db', 'company_database.db')  # Include the DB file in the zip
+                      
+                      zip_buffer.seek(0)
+                      s3.upload_fileobj(zip_buffer, bucket_name, 'lambda_code.zip')
+                      
+                      response_data['S3Key'] = 'lambda_code.zip'
+                      response_data['S3Bucket'] = bucket_name
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                  else:  # Delete
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+
   # Lambda Function for Action Call
   ActionCall:
     Type: 'AWS::Lambda::Function'
+    DependsOn: ActionCallCodeUpload
     Properties:
       FunctionName: !Sub 'ActionCall-${AWS::AccountId}'
       Handler: index.lambda_handler
@@ -86,116 +459,8 @@ Resources:
       DeadLetterConfig:
         TargetArn: !GetAtt ActionCallDLQ.Arn
       Code:
-        ZipFile: |
-          import json
-
-          def lambda_handler(event, context):
-              print(event)
-            
-              # Mock data for demonstration purposes
-              company_data = [
-                  #Technology Industry
-                  {"companyId": 1, "companyName": "TechStashNova Inc.", "industrySector": "Technology", "revenue": 10000, "expenses": 3000, "profit": 7000, "employees": 10},
-                  {"companyId": 2, "companyName": "QuantumPirateLeap Technologies", "industrySector": "Technology", "revenue": 20000, "expenses": 4000, "profit": 16000, "employees": 10},
-                  {"companyId": 3, "companyName": "CyberCipherSecure IT", "industrySector": "Technology", "revenue": 30000, "expenses": 5000, "profit": 25000, "employees": 10},
-                  {"companyId": 4, "companyName": "DigitalMyricalDreams Gaming", "industrySector": "Technology", "revenue": 40000, "expenses": 6000, "profit": 34000, "employees": 10},
-                  {"companyId": 5, "companyName": "NanoMedNoLand Pharmaceuticals", "industrySector": "Technology", "revenue": 50000, "expenses": 7000, "profit": 43000, "employees": 10},
-                  {"companyId": 6, "companyName": "RoboSuperBombTech Industries", "industrySector": "Technology", "revenue": 60000, "expenses": 8000, "profit": 52000, "employees": 12},
-                  {"companyId": 7, "companyName": "FuturePastNet Solutions", "industrySector": "Technology",  "revenue": 60000, "expenses": 9000, "profit": 51000, "employees": 10},
-                  {"companyId": 8, "companyName": "InnovativeCreativeAI Corp", "industrySector": "Technology", "revenue": 65000, "expenses": 10000, "profit": 55000, "employees": 15},
-                  {"companyId": 9, "companyName": "EcoLeekoTech Energy", "industrySector": "Technology", "revenue": 70000, "expenses": 11000, "profit": 59000, "employees": 10},
-                  {"companyId": 10, "companyName": "TechyWealthHealth Systems", "industrySector": "Technology", "revenue": 80000, "expenses": 12000, "profit": 68000, "employees": 10},
-              
-                  #Real Estate Industry
-                  {"companyId": 11, "companyName": "LuxuryToNiceLiving Real Estate", "industrySector": "Real Estate", "revenue": 90000, "expenses": 13000, "profit": 77000, "employees": 10},
-                  {"companyId": 12, "companyName": "UrbanTurbanDevelopers Inc.", "industrySector": "Real Estate", "revenue": 100000, "expenses": 14000, "profit": 86000, "employees": 10},
-                  {"companyId": 13, "companyName": "SkyLowHigh Towers", "industrySector": "Real Estate", "revenue": 110000, "expenses": 15000, "profit": 95000, "employees": 18},
-                  {"companyId": 14, "companyName": "GreenBrownSpace Properties", "industrySector": "Real Estate", "revenue": 120000, "expenses": 16000, "profit": 104000, "employees": 10},
-                  {"companyId": 15, "companyName": "ModernFutureHomes Ltd.", "industrySector": "Real Estate", "revenue": 130000, "expenses": 17000, "profit": 113000, "employees": 10},
-                  {"companyId": 16, "companyName": "CityCountycape Estates", "industrySector": "Real Estate", "revenue": 140000, "expenses": 18000, "profit": 122000, "employees": 10},
-                  {"companyId": 17, "companyName": "CoastalFocalRealty Group", "industrySector": "Real Estate", "revenue": 150000, "expenses": 19000, "profit": 131000, "employees": 10},
-                  {"companyId": 18, "companyName": "InnovativeModernLiving Spaces", "industrySector": "Real Estate", "revenue": 160000, "expenses": 20000, "profit": 140000, "employees": 10},
-                  {"companyId": 19, "companyName": "GlobalRegional Properties Alliance", "industrySector": "Real Estate", "revenue": 170000, "expenses": 21000, "profit": 149000, "employees": 11},
-                  {"companyId": 20, "companyName": "NextGenPast Residences", "industrySector": "Real Estate", "revenue": 180000, "expenses": 22000, "profit": 158000, "employees": 260}
-              ]
-              
-            
-              def get_named_parameter(event, name):
-                  return next(item for item in event['parameters'] if item['name'] == name)['value']
-              
-          
-              def companyResearch(event):
-                  companyName = get_named_parameter(event, 'name').lower()
-                  print("NAME PRINTED: ", companyName)
-                  
-                  for company_info in company_data:
-                      if company_info["companyName"].lower() == companyName:
-                          return company_info
-                  return None
-              
-              def createPortfolio(event, company_data):
-                  numCompanies = int(get_named_parameter(event, 'numCompanies'))
-                  industry = get_named_parameter(event, 'industry').lower()
-
-                  industry_filtered_companies = [company for company in company_data
-                                                if company['industrySector'].lower() == industry]
-
-                  sorted_companies = sorted(industry_filtered_companies, key=lambda x: x['profit'], reverse=True)
-
-                  top_companies = sorted_companies[:numCompanies]
-                  return top_companies
-
-          
-              def sendEmail(event, company_data):
-                  emailAddress = get_named_parameter(event, 'emailAddress')
-                  fomcSummary = get_named_parameter(event, 'fomcSummary')
-              
-                  # Retrieve the portfolio data as a string
-                  portfolioDataString = get_named_parameter(event, 'portfolio')
-              
-
-                  # Prepare the email content
-                  email_subject = "Portfolio Creation Summary and FOMC Search Results"
-                  #email_body = f"FOMC Search Summary:\n{fomcSummary}\n\nPortfolio Details:\n{json.dumps(portfolioData, indent=4)}"
-              
-                  # Email sending code here (commented out for now)
-              
-                  return "Email sent successfully to {}".format(emailAddress)   
-                
-                
-              result = ''
-              response_code = 200
-              action_group = event['actionGroup']
-              api_path = event['apiPath']
-              
-              print("api_path: ", api_path )
-              
-              if api_path == '/companyResearch':
-                  result = companyResearch(event)
-              elif api_path == '/createPortfolio':
-                  result = createPortfolio(event, company_data)
-              elif api_path == '/sendEmail':
-                  result = sendEmail(event, company_data)
-              else:
-                  response_code = 404
-                  result = f"Unrecognized api path: {action_group}::{api_path}"
-                  
-              response_body = {
-                  'application/json': {
-                      'body': result
-                  }
-              }
-                  
-              action_response = {
-                  'actionGroup': event['actionGroup'],
-                  'apiPath': event['apiPath'],
-                  'httpMethod': event['httpMethod'],
-                  'httpStatusCode': response_code,
-                  'responseBody': response_body
-              }
-
-              api_response = {'messageVersion': '1.0', 'response': action_response}
-              return api_response
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: 'lambda_code.zip'
 
   # Lambda Permission for Bedrock to Invoke Lambda
   LambdaInvokePermission:
@@ -461,7 +726,7 @@ Resources:
 
                       Participants noted that recent indicators pointed to modest growth in spending and production. Nonetheless, job gains had been robust in recent months, and the unemployment rate remained low. Inflation had eased somewhat but remained elevated.
                       
-                      Participants recognized that Russia’s war against Ukraine was causing tremendous human and economic hardship and was contributing to elevated global uncertainty. Against this background, participants continued to be highly attentive to inflation risks.
+                      Participants recognized that Russia's war against Ukraine was causing tremendous human and economic hardship and was contributing to elevated global uncertainty. Against this background, participants continued to be highly attentive to inflation risks.
                     </email_format>
 
                     You will ALWAYS follow the below guidelines when you are answering a question:
@@ -522,4 +787,6 @@ Outputs:
   ActionCallArn:
     Description: 'ARN of the invoke Lambda function'
     Value: !GetAtt ActionCall.Arn
-
+  DatabaseS3Location:
+    Description: 'S3 location of the SQLite database'
+    Value: !Sub '${LambdaCodeBucket}/company_database.db'

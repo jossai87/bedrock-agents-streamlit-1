@@ -4,6 +4,7 @@ import base64
 import io
 import sys
 import boto3
+import re
 
 from boto3.session import Session
 from botocore.auth import SigV4Auth
@@ -138,63 +139,86 @@ def askQuestion(question, url, endSession=False):
 # ---------------------------------------------------------------------
 def decode_response(response):
     """
-    Decodes the chunked/streamed response, looking for base64-encoded 
-    segments. Returns a tuple of (debug_string, final_response).
-    """
+    Decodes the chunked/streamed response from Bedrock Agent, extracting 
+    base64-encoded messages and the final response text.
+    
+    Returns a tuple of (debug_string, final_response).
+    """    
+    # Capture stdout for debugging
     captured_output = io.StringIO()
+    original_stdout = sys.stdout
     sys.stdout = captured_output
-
-    string = ""
-    for line in response.iter_content():
-        try:
-            string += line.decode(encoding='utf-8')
-        except:
-            # If a particular chunk can't be decoded as UTF-8, just skip it
-            continue
-
-    print("Decoded response:", string)
-    split_response = string.split(":message-type")
-    print(f"Split Response: {split_response}")
-    print(f"Length of split: {len(split_response)}")
-
-    final_response = ""
-    for idx in range(len(split_response)):
-        if "bytes" in split_response[idx]:
-            encoded_last_response = split_response[idx].split("\"")[3]
-            decoded = base64.b64decode(encoded_last_response)
-            final_response_chunk = decoded.decode('utf-8')
-            print(final_response_chunk)
+    
+    try:
+        # Accumulate the full response
+        string = ""
+        for line in response.iter_content():
+            try:
+                string += line.decode(encoding='utf-8')
+            except UnicodeDecodeError:
+                # Skip chunks that can't be decoded as UTF-8
+                continue
+        
+        print("Decoded response:", string)
+        split_response = string.split(":message-type")
+        print(f"Split Response: {split_response}")
+        print(f"Length of split: {len(split_response)}")
+        print("Received response of length:", len(string))
+        
+        # Extract the final response using multiple approaches
+        final_response = ""
+        
+        # Use regex to find all base64 encoded content in "bytes" fields
+        base64_pattern = r'"bytes"\s*:\s*"([^"]+)"'
+        base64_matches = re.findall(base64_pattern, string)
+        
+        if base64_matches:
+            print(f"Found {len(base64_matches)} base64-encoded segments")
+            # Use the last base64 encoded content
+            try:
+                decoded = base64.b64decode(base64_matches[-1])
+                final_response = decoded.decode('utf-8')
+                print("Successfully decoded base64 response")
+            except Exception as e:
+                print(f"Error decoding base64: {str(e)}")
+        
+        #Look for finalResponse in JSON if no base64 matches found
+        if not final_response:
+            print("Trying to find finalResponse in JSON")
+            try:
+                # Look for "finalResponse":{"text":"..."} pattern
+                final_response_pattern = r'"finalResponse"\s*:\s*{[^}]*"text"\s*:\s*"(.*?)"'
+                final_response_match = re.search(final_response_pattern, string, re.DOTALL)
+                
+                if final_response_match:
+                    final_response = final_response_match.group(1)
+                    # Unescape JSON string escapes like \"
+                    final_response = json.loads(f'"{final_response}"') 
+                    print("Found finalResponse in JSON")
+            except Exception as e:
+                print(f"Error extracting finalResponse from JSON: {str(e)}")
+        
+        # Clean up response if needed
+        if final_response:
+            # Handle any common cleanup needed
+            final_response = final_response.replace('"', '')
+            final_response = final_response.replace("{input:{value:", "")
+            final_response = final_response.replace(",source:null}}", "")
         else:
-            print(f"No bytes at index {idx}")
-            print(split_response[idx])
-            
-    # Attempt to parse the last part for finalResponse
-    last_response = split_response[-1]
-    print(f"Last Response: {last_response}")
-    if "bytes" in last_response:
-        print("Bytes in last response")
-        encoded_last_response = last_response.split("\"")[3]
-        decoded = base64.b64decode(encoded_last_response)
-        final_response = decoded.decode('utf-8')
-    else:
-        print("No bytes in last response")
-        part1 = string[string.find('finalResponse')+len('finalResponse":'):]
-        part2 = part1[:part1.find('"}')+2]
-        final_response = json.loads(part2)['text']
-
-    # Cleanup the final response
-    final_response = final_response.replace("\"", "")
-    final_response = final_response.replace("{input:{value:", "")
-    final_response = final_response.replace(",source:null}}", "")
-
-    # Restore original stdout
-    sys.stdout = sys.__stdout__
-
-    # Get debug string
+            print("WARNING: Could not extract a final response")
+            final_response = "Could not decode response"
+    
+    except Exception as e:
+        print(f"Error in decode_response: {str(e)}")
+        final_response = f"Error processing response: {str(e)}"
+    
+    finally:
+        # Restore original stdout
+        sys.stdout = original_stdout
+    
+    # Return both the debug output and the final response
     captured_string = captured_output.getvalue()
-
     return captured_string, final_response
-
 # ---------------------------------------------------------------------
 # LAMBDA HANDLER (if used in AWS Lambda)
 # ---------------------------------------------------------------------
