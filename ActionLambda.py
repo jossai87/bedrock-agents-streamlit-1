@@ -1,8 +1,9 @@
 import json
+import boto3
+from botocore.exceptions import ClientError
 
 def lambda_handler(event, context):
     print(event)
-  
     # Mock data for demonstration purposes
     company_data = [
         #Technology Industry
@@ -12,11 +13,11 @@ def lambda_handler(event, context):
         {"companyId": 4, "companyName": "DigitalMyricalDreams Gaming", "industrySector": "Technology", "revenue": 40000, "expenses": 6000, "profit": 34000, "employees": 10},
         {"companyId": 5, "companyName": "NanoMedNoLand Pharmaceuticals", "industrySector": "Technology", "revenue": 50000, "expenses": 7000, "profit": 43000, "employees": 10},
         {"companyId": 6, "companyName": "RoboSuperBombTech Industries", "industrySector": "Technology", "revenue": 60000, "expenses": 8000, "profit": 52000, "employees": 12},
-        {"companyId": 7, "companyName": "FuturePastNet Solutions", "industrySector": "Technology",  "revenue": 60000, "expenses": 9000, "profit": 51000, "employees": 10},
+        {"companyId": 7, "companyName": "FuturePastNet Solutions", "industrySector": "Technology", "revenue": 60000, "expenses": 9000, "profit": 51000, "employees": 10},
         {"companyId": 8, "companyName": "InnovativeCreativeAI Corp", "industrySector": "Technology", "revenue": 65000, "expenses": 10000, "profit": 55000, "employees": 15},
         {"companyId": 9, "companyName": "EcoLeekoTech Energy", "industrySector": "Technology", "revenue": 70000, "expenses": 11000, "profit": 59000, "employees": 10},
         {"companyId": 10, "companyName": "TechyWealthHealth Systems", "industrySector": "Technology", "revenue": 80000, "expenses": 12000, "profit": 68000, "employees": 10},
-    
+        
         #Real Estate Industry
         {"companyId": 11, "companyName": "LuxuryToNiceLiving Real Estate", "industrySector": "Real Estate", "revenue": 90000, "expenses": 13000, "profit": 77000, "employees": 10},
         {"companyId": 12, "companyName": "UrbanTurbanDevelopers Inc.", "industrySector": "Real Estate", "revenue": 100000, "expenses": 14000, "profit": 86000, "employees": 10},
@@ -29,62 +30,103 @@ def lambda_handler(event, context):
         {"companyId": 19, "companyName": "GlobalRegional Properties Alliance", "industrySector": "Real Estate", "revenue": 170000, "expenses": 21000, "profit": 149000, "employees": 11},
         {"companyId": 20, "companyName": "NextGenPast Residences", "industrySector": "Real Estate", "revenue": 180000, "expenses": 22000, "profit": 158000, "employees": 260}
     ]
-    
-  
-    def get_named_parameter(event, name):
-        return next(item for item in event['parameters'] if item['name'] == name)['value']
-    
-    def get_named_property(event, name):
-        return next(item for item in event['requestBody']['content']['application/json']['properties'] if item['name'] == name)['value']
 
- 
+    def get_named_parameter(event, name):
+        '''Function searches through the parameters list in the event dictionary and returns the value of the parameter whose name matches the provided name string'''
+        return next(item for item in event['parameters'] if item['name'] == name)['value']
+
     def companyResearch(event):
+        '''Searches for a company based on the 'name' parameter in the lambda event and returns its information if found.'''
         companyName = get_named_parameter(event, 'name').lower()
         print("NAME PRINTED: ", companyName)
-        
         for company_info in company_data:
             if company_info["companyName"].lower() == companyName:
                 return company_info
-
         return None
-    
+
     def createPortfolio(event, company_data):
+        '''Creates a portfolio of top companies based on the 'numCompanies' and 'industry' parameters in the lambda event.'''
         numCompanies = int(get_named_parameter(event, 'numCompanies'))
         industry = get_named_parameter(event, 'industry').lower()
-
-        industry_filtered_companies = [company for company in company_data
-                                       if company['industrySector'].lower() == industry]
-
+        industry_filtered_companies = [company for company in company_data if company['industrySector'].lower() == industry]
         sorted_companies = sorted(industry_filtered_companies, key=lambda x: x['profit'], reverse=True)
-
         top_companies = sorted_companies[:numCompanies]
         return top_companies
 
- 
     def sendEmail(event, company_data):
+        '''Sends an email using Amazon SES with a summary report and portfolio details'''
+        # Get parameters from event
         emailAddress = get_named_parameter(event, 'emailAddress')
         fomcSummary = get_named_parameter(event, 'fomcSummary')
-    
-        # Retrieve the portfolio data as a string
         portfolioDataString = get_named_parameter(event, 'portfolio')
-    
+        
+        # Create the email content
+        SENDER = emailAddress  # Replace with your email. Must be verified in SES
+        RECIPIENT = emailAddress
+        SUBJECT = "Company Portfolio and Search Results Summary Report"
+        
+        # Create the email body
+        BODY_TEXT = (f"Search Summary Report:\n\n{fomcSummary}\n\n"
+                     f"Portfolio Details:\n{portfolioDataString}")
+        
+        # HTML version of the email
+        BODY_HTML = f"""
+        <html>
+        <head></head>
+        <body>
+            <h2>Search Summary Report</h2>
+            <p>{fomcSummary}</p>
+            <h2>Portfolio Details</h2>
+            <pre>{portfolioDataString}</pre>
+        </body>
+        </html>
+        """
+        
+        # The character encoding for the email
+        CHARSET = "UTF-8"
+        
+        try:
+            # Create a new SES client
+            ses_client = boto3.client('ses')
+            
+            # Send the email
+            response = ses_client.send_email(
+                Destination={
+                    'ToAddresses': [
+                        RECIPIENT,
+                    ],
+                },
+                Message={
+                    'Body': {
+                        'Html': {
+                            'Charset': CHARSET,
+                            'Data': BODY_HTML,
+                        },
+                        'Text': {
+                            'Charset': CHARSET,
+                            'Data': BODY_TEXT,
+                        },
+                    },
+                    'Subject': {
+                        'Charset': CHARSET,
+                        'Data': SUBJECT,
+                    },
+                },
+                Source=SENDER
+            )
+            
+        except ClientError as e:
+            print(e.response['Error']['Message'])
+            return f"Error sending email: {str(e)}"
+        else:
+            return f"Email sent successfully to {emailAddress}! MessageId: {response['MessageId']}"
 
-        # Prepare the email content
-        email_subject = "Portfolio Creation Summary and FOMC Search Results"
-        #email_body = f"FOMC Search Summary:\n{fomcSummary}\n\nPortfolio Details:\n{json.dumps(portfolioData, indent=4)}"
-    
-        # Email sending code here (commented out for now)
-    
-        return "Email sent successfully to {}".format(emailAddress)   
-      
-      
     result = ''
     response_code = 200
     action_group = event['actionGroup']
     api_path = event['apiPath']
-    
-    print("api_path: ", api_path )
-    
+    print("api_path: ", api_path)
+
     if api_path == '/companyResearch':
         result = companyResearch(event)
     elif api_path == '/createPortfolio':
@@ -94,13 +136,13 @@ def lambda_handler(event, context):
     else:
         response_code = 404
         result = f"Unrecognized api path: {action_group}::{api_path}"
-        
+
     response_body = {
         'application/json': {
             'body': result
         }
     }
-        
+
     action_response = {
         'actionGroup': event['actionGroup'],
         'apiPath': event['apiPath'],
