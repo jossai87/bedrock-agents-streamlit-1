@@ -39,7 +39,11 @@ Resources:
                 Action:
                   - 'sqs:SendMessage'
                 Resource: !GetAtt ActionCallDLQ.Arn
-
+              - Effect: Allow
+                Action:
+                  - 'ses:SendEmail'
+                  - 'ses:SendRawEmail'
+                Resource: '*'
   # IAM Managed Policy for Lambda Invocation
   LambdaInvokePolicy:
     Type: 'AWS::IAM::ManagedPolicy'
