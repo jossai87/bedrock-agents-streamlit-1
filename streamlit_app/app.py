@@ -252,6 +252,7 @@ for index, chat in enumerate(reversed(st.session_state['history'])):
         with col1_a:
             st.image(circular_robot_image, width=50)
         with col2_a:
-            st.text_area("Agent response", value=chat['answer'], height=150, key=f"answer_{index}", disabled=True, label_visibility="collapsed")
+            with st.container(border=True):
+                st.write(chat['answer'])
 
     st.divider()
