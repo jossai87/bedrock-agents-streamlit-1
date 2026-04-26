@@ -19,6 +19,35 @@ def crop_to_circle(image):
 # Title
 st.title("Co. Portfolio Creator")
 
+# -------------------------------------------------------------------
+# Sidebar: Agent Configuration
+# -------------------------------------------------------------------
+st.sidebar.title("Agent Configuration")
+
+if 'agent_id' not in st.session_state:
+    st.session_state['agent_id'] = ""
+if 'agent_alias_id' not in st.session_state:
+    st.session_state['agent_alias_id'] = ""
+
+agent_id = st.sidebar.text_input("Agent ID", value=st.session_state['agent_id'], placeholder="e.g. ABCDEF1234")
+agent_alias_id = st.sidebar.text_input("Agent Alias ID", value=st.session_state['agent_alias_id'], placeholder="e.g. ZYXWVU9876")
+
+# Persist values in session state
+st.session_state['agent_id'] = agent_id
+st.session_state['agent_alias_id'] = agent_alias_id
+
+# Show a warning if the IDs are not set
+if not agent_id or not agent_alias_id:
+    st.warning("Please enter your **Agent ID** and **Agent Alias ID** in the sidebar to get started.")
+
+# Sidebar: Trace Data (below the config)
+st.sidebar.markdown("---")
+st.sidebar.title("Trace Data")
+
+# Session State Management
+if 'history' not in st.session_state:
+    st.session_state['history'] = []
+
 # Display a text box for input
 prompt = st.text_input("Please enter your query?", max_chars=2000)
 prompt = prompt.strip()
@@ -28,13 +57,6 @@ submit_button = st.button("Submit", type="primary")
 
 # Display a button to end the session
 end_session_button = st.button("End Session")
-
-# Sidebar for user input
-st.sidebar.title("Trace Data")
-
-# Session State Management
-if 'history' not in st.session_state:
-    st.session_state['history'] = []
 
 # Function to parse and format response
 def format_response(response_body):
@@ -52,49 +74,54 @@ def format_response(response_body):
 
 # Handling user input and responses
 if submit_button and prompt:
-    event = {
-        "sessionId": "MYSESSION",
-        "question": prompt
-    }
-    response = agenthelper.lambda_handler(event, None)
-    
-    try:
-        # Parse the JSON string
-        if response and 'body' in response and response['body']:
-            response_data = json.loads(response['body'])
-            print("TRACE & RESPONSE DATA ->  ", response_data)
-        else:
-            print("Invalid or empty response received")
-    except json.JSONDecodeError as e:
-        print("JSON decoding error:", e)
-        response_data = None 
-    
-    try:
-        # Check if response_data is None or contains error
-        if response_data is None:
-            all_data = "No response data"
-            the_response = "Failed to get response from agent"
-        elif 'error' in response_data:
-            all_data = "Error occurred"
-            the_response = f"Agent error: {response_data['error']}"
-        elif 'response' in response_data and 'trace_data' in response_data:
-            # Extract the response and trace data
-            all_data = format_response(response_data['response'])
-            the_response = response_data['trace_data']
-        else:
-            all_data = f"Unexpected response format: {list(response_data.keys()) if response_data else 'None'}"
-            the_response = f"Response data: {response_data}"
-    except Exception as e:
-        print(f"Error extracting response data: {e}")
-        print(f"Response data: {response_data}")
-        print(f"Full response: {response}")
-        all_data = "..." 
-        the_response = f"Error occurred: {str(e)}" 
+    if not agent_id or not agent_alias_id:
+        st.error("Please enter your Agent ID and Agent Alias ID in the sidebar before submitting a query.")
+    else:
+        event = {
+            "sessionId": "MYSESSION",
+            "question": prompt,
+            "agentId": agent_id,
+            "agentAliasId": agent_alias_id
+        }
+        response = agenthelper.lambda_handler(event, None)
+        
+        try:
+            # Parse the JSON string
+            if response and 'body' in response and response['body']:
+                response_data = json.loads(response['body'])
+                print("TRACE & RESPONSE DATA ->  ", response_data)
+            else:
+                print("Invalid or empty response received")
+        except json.JSONDecodeError as e:
+            print("JSON decoding error:", e)
+            response_data = None 
+        
+        try:
+            # Check if response_data is None or contains error
+            if response_data is None:
+                all_data = "No response data"
+                the_response = "Failed to get response from agent"
+            elif 'error' in response_data:
+                all_data = "Error occurred"
+                the_response = f"Agent error: {response_data['error']}"
+            elif 'response' in response_data and 'trace_data' in response_data:
+                # Extract the response and trace data
+                all_data = format_response(response_data['response'])
+                the_response = response_data['trace_data']
+            else:
+                all_data = f"Unexpected response format: {list(response_data.keys()) if response_data else 'None'}"
+                the_response = f"Response data: {response_data}"
+        except Exception as e:
+            print(f"Error extracting response data: {e}")
+            print(f"Response data: {response_data}")
+            print(f"Full response: {response}")
+            all_data = "..." 
+            the_response = f"Error occurred: {str(e)}" 
 
-    # Use trace_data and formatted_response as needed
-    st.sidebar.text_area("", value=all_data, height=300)
-    st.session_state['history'].append({"question": prompt, "answer": the_response})
-    st.session_state['trace_data'] = the_response
+        # Use trace_data and formatted_response as needed
+        st.sidebar.text_area("", value=all_data, height=300)
+        st.session_state['history'].append({"question": prompt, "answer": the_response})
+        st.session_state['trace_data'] = the_response
   
 
 if end_session_button:
@@ -102,7 +129,9 @@ if end_session_button:
     event = {
         "sessionId": "MYSESSION",
         "question": "placeholder to end session",
-        "endSession": True
+        "endSession": True,
+        "agentId": agent_id,
+        "agentAliasId": agent_alias_id
     }
     agenthelper.lambda_handler(event, None)
     st.session_state['history'].clear()
@@ -111,8 +140,10 @@ if end_session_button:
 st.write("## Conversation History")
 
 # Load images outside the loop to optimize performance
-human_image = Image.open('/home/ubuntu/app/streamlit_app/human_face.png')
-robot_image = Image.open('/home/ubuntu/app/streamlit_app/robot_face.jpg')
+import pathlib
+_app_dir = pathlib.Path(__file__).parent
+human_image = Image.open(_app_dir / 'human_face.png')
+robot_image = Image.open(_app_dir / 'robot_face.jpg')
 circular_human_image = crop_to_circle(human_image)
 circular_robot_image = crop_to_circle(robot_image)
 

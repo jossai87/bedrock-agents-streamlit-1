@@ -3,7 +3,6 @@ import json
 import base64
 import io
 import sys
-import boto3
 
 from boto3.session import Session
 from botocore.auth import SigV4Auth
@@ -12,24 +11,8 @@ from botocore.credentials import Credentials
 from requests import request
 
 # Region configuration moved here to be available for all clients
-theRegion = "us-west-2"
+theRegion = os.environ.get("AWS_REGION", "us-west-2")
 os.environ["AWS_REGION"] = theRegion
-
-ssm = boto3.client('ssm', region_name=theRegion)
-
-# ---------------------------------------------------------------------
-# Replace with your actual Agent ID and Alias ID below:
-# ---------------------------------------------------------------------
-
-agentId = "<YOUR AGENT ID>" #INPUT YOUR AGENT ID HERE.
-agentAliasId = "<YOUR ALIAS ID>" #INPUT YOUR ALIAS ID HERE.
-
-# Fetch parameters
-#agentId = ssm.get_parameter(Name='/agent-id', WithDecryption=True)['Parameter']['Value'] #valid if CFN infrastructure templates were ran
-#agentAliasId = ssm.get_parameter(Name='/alias-id', WithDecryption=True)['Parameter']['Value'] #valid if CFN infrastructure templates were ran
-
-
-# Region configuration moved to top of file
 
 # ---------------------------------------------------------------------
 # HELPER FUNCTION TO GET AWS CREDENTIALS SAFELY
@@ -239,6 +222,8 @@ def lambda_handler(event, context):
     """
     sessionId = event["sessionId"]
     question = event["question"]
+    agentId = event["agentId"]
+    agentAliasId = event["agentAliasId"]
     endSession = False
     
     print(f"Session: {sessionId} asked question: {question}")
