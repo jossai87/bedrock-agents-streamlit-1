@@ -70,6 +70,8 @@ Resources:
     Type: 'AWS::EC2::VPC'
     Properties:
       CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
       Tags:
         - Key: Name
           Value: Bedrock-VPC
@@ -227,10 +229,10 @@ Outputs:
     Description: InstanceId of the newly created EC2 instance
     Value: !Ref EC2Instance
   
-  PublicDnsName:
-    Description: The public DNS name of the EC2 instance
-    Value: !GetAtt EC2Instance.PublicDnsName
+  PublicIp:
+    Description: The public IP address of the EC2 instance
+    Value: !GetAtt EC2Instance.PublicIp
 
   StreamlitAppURL:
     Description: URL to access the Streamlit application
-    Value: !Sub "http://${EC2Instance.PublicDnsName}:8501"
+    Value: !Sub "http://${EC2Instance.PublicIp}:8501"
