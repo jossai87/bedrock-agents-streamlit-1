@@ -214,7 +214,7 @@ for index, chat in enumerate(reversed(st.session_state['history'])):
     with col1_q:
         st.image(circular_human_image, width=50)
     with col2_q:
-        st.markdown(f"**You:** {chat['question']}")
+        st.text(f"You: {chat['question']}")
 
     # Answer
     col1_a, col2_a = st.columns([1, 11])
@@ -227,7 +227,7 @@ for index, chat in enumerate(reversed(st.session_state['history'])):
         with col1_a:
             st.image(circular_robot_image, width=50)
         with col2_a:
-            st.markdown(f"**Agent:** {chat['answer']}")
+            st.text_area("Agent response", value=chat['answer'], height=150, key=f"answer_{index}", disabled=True, label_visibility="collapsed")
 
     st.divider()
 
