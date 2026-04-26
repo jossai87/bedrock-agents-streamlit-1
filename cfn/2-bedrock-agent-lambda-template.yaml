@@ -266,7 +266,7 @@ Resources:
       AgentName: !Sub 'PortfolioCreator-${AWS::AccountId}'
       AgentResourceRoleArn: !GetAtt BedrockAgentExecutionRole.Arn
       AutoPrepare: 'True'
-      FoundationModel: 'anthropic.claude-3-haiku-20240307-v1:0'
+      FoundationModel: 'amazon.nova-lite-v1:0'
       Instruction: |
         You are an investment analyst. Your job is to assist in investment analysis, create research summaries, generate profitable company portfolios, and facilitate communication through emails. Here is how I want you to think step by step:
 
