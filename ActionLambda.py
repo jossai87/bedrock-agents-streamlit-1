@@ -60,29 +60,81 @@ def lambda_handler(event, context):
         fomcSummary = get_named_parameter(event, 'fomcSummary')
         portfolioDataString = get_named_parameter(event, 'portfolio')
         
+        # Format portfolio data for display
+        portfolio_html = ""
+        portfolio_text = ""
+        try:
+            portfolio = json.loads(portfolioDataString) if isinstance(portfolioDataString, str) else portfolioDataString
+            if isinstance(portfolio, list):
+                companies = portfolio
+            elif isinstance(portfolio, dict) and 'companies' in portfolio:
+                companies = portfolio['companies']
+            else:
+                companies = [portfolio] if isinstance(portfolio, dict) else []
+            
+            for i, company in enumerate(companies, 1):
+                name = company.get('companyName', company.get('name', 'N/A'))
+                revenue = company.get('revenue', 'N/A')
+                expenses = company.get('expenses', 'N/A')
+                profit = company.get('profit', 'N/A')
+                employees = company.get('employees', 'N/A')
+                
+                portfolio_text += (f"  {i}. {name}\n"
+                                   f"     Revenue: ${revenue:,}\n"
+                                   f"     Expenses: ${expenses:,}\n"
+                                   f"     Profit: ${profit:,}\n"
+                                   f"     Employees: {employees}\n\n")
+                
+                portfolio_html += f"""
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{i}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{name}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${revenue:,}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${expenses:,}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${profit:,}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{employees}</td>
+                </tr>"""
+        except (json.JSONDecodeError, TypeError, ValueError):
+            portfolio_text = str(portfolioDataString)
+            portfolio_html = f"<p>{portfolioDataString}</p>"
+        
         # Create the email content
-        SENDER = emailAddress  # Replace with your email. Must be verified in SES
+        SENDER = emailAddress
         RECIPIENT = emailAddress
         SUBJECT = "Company Portfolio and Search Results Summary Report"
         
-        # Create the email body
-        BODY_TEXT = (f"Search Summary Report:\n\n{fomcSummary}\n\n"
-                     f"Portfolio Details:\n{portfolioDataString}")
+        # Plain text version
+        BODY_TEXT = (f"Search Summary Report\n{'='*40}\n\n{fomcSummary}\n\n"
+                     f"Portfolio Details\n{'='*40}\n\n{portfolio_text}")
         
-        # HTML version of the email
+        # HTML version with styled table
         BODY_HTML = f"""
         <html>
         <head></head>
-        <body>
-            <h2>Search Summary Report</h2>
-            <p>{fomcSummary}</p>
-            <h2>Portfolio Details</h2>
-            <pre>{portfolioDataString}</pre>
+        <body style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
+            <h2 style="color: #232f3e;">Search Summary Report</h2>
+            <p style="line-height: 1.6;">{fomcSummary}</p>
+            <hr style="border: 1px solid #eee;">
+            <h2 style="color: #232f3e;">Portfolio Details</h2>
+            <table style="border-collapse: collapse; width: 100%;">
+                <thead>
+                    <tr style="background-color: #232f3e; color: white;">
+                        <th style="padding: 10px; border: 1px solid #ddd;">#</th>
+                        <th style="padding: 10px; border: 1px solid #ddd;">Company</th>
+                        <th style="padding: 10px; border: 1px solid #ddd;">Revenue</th>
+                        <th style="padding: 10px; border: 1px solid #ddd;">Expenses</th>
+                        <th style="padding: 10px; border: 1px solid #ddd;">Profit</th>
+                        <th style="padding: 10px; border: 1px solid #ddd;">Employees</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {portfolio_html}
+                </tbody>
+            </table>
         </body>
         </html>
         """
         
-        # The character encoding for the email
         CHARSET = "UTF-8"
         
         try:
