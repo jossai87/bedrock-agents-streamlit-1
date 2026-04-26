@@ -1,11 +1,16 @@
 import invoke_agent as agenthelper
 import streamlit as st
 import json
+import re
 import pandas as pd
 from PIL import Image, ImageOps, ImageDraw
+import pathlib
 
 # Streamlit page configuration
 st.set_page_config(page_title="Co. Portfolio Creator", page_icon=":robot_face:", layout="wide")
+
+# Resolve app directory for image paths
+_app_dir = pathlib.Path(__file__).parent
 
 # Function to crop image into a circle
 def crop_to_circle(image):
@@ -15,6 +20,12 @@ def crop_to_circle(image):
     result = ImageOps.fit(image, mask.size, centering=(0.5, 0.5))
     result.putalpha(mask)
     return result
+
+# Load images once
+human_image = Image.open(_app_dir / 'human_face.png')
+robot_image = Image.open(_app_dir / 'robot_face.jpg')
+circular_human_image = crop_to_circle(human_image)
+circular_robot_image = crop_to_circle(robot_image)
 
 # Title
 st.title("Co. Portfolio Creator")
@@ -32,11 +43,9 @@ if 'agent_alias_id' not in st.session_state:
 agent_id = st.sidebar.text_input("Agent ID", value=st.session_state['agent_id'], placeholder="e.g. ABCDEF1234")
 agent_alias_id = st.sidebar.text_input("Agent Alias ID", value=st.session_state['agent_alias_id'], placeholder="e.g. ZYXWVU9876")
 
-# Persist values in session state
 st.session_state['agent_id'] = agent_id
 st.session_state['agent_alias_id'] = agent_alias_id
 
-# Show a warning if the IDs are not set
 if not agent_id or not agent_alias_id:
     st.warning("Please enter your **Agent ID** and **Agent Alias ID** in the sidebar to get started.")
 
@@ -48,31 +57,71 @@ st.sidebar.title("Trace Data")
 if 'history' not in st.session_state:
     st.session_state['history'] = []
 
-# Display a text box for input
-prompt = st.text_input("Please enter your query?", max_chars=2000)
-prompt = prompt.strip()
+# -------------------------------------------------------------------
+# Helper: Clean up raw trace data for display
+# -------------------------------------------------------------------
+def clean_trace_data(raw_trace):
+    """Extract meaningful trace steps from the raw debug output."""
+    if not raw_trace or not isinstance(raw_trace, str):
+        return "No trace data available."
 
-# Display a primary button for submission
-submit_button = st.button("Submit", type="primary")
+    lines = raw_trace.strip().split('\n')
+    cleaned = []
+    for line in lines:
+        line = line.strip()
+        # Skip raw binary/encoded data and internal debug noise
+        if not line:
+            continue
+        if line.startswith("Decoded response:"):
+            continue
+        if line.startswith("Split Response:"):
+            continue
+        if line.startswith("Length of split:"):
+            continue
+        if line.startswith("Last Response:"):
+            continue
+        if line.startswith("No bytes at index"):
+            continue
+        if line.startswith("Bytes in last response"):
+            continue
+        if "message-type" in line and len(line) > 200:
+            continue
+        if re.match(r'^[A-Za-z0-9+/=]{50,}$', line):
+            continue
+        # Keep meaningful decoded content
+        cleaned.append(line)
 
-# Display a button to end the session
-end_session_button = st.button("End Session")
+    if not cleaned:
+        return "No trace details captured."
 
-# Function to parse and format response
+    return '\n'.join(cleaned)
+
+
+# -------------------------------------------------------------------
+# Helper: Format response body
+# -------------------------------------------------------------------
 def format_response(response_body):
     try:
-        # Try to load the response as JSON
         data = json.loads(response_body)
-        # If it's a list, convert it to a DataFrame for better visualization
         if isinstance(data, list):
             return pd.DataFrame(data)
         else:
             return response_body
     except json.JSONDecodeError:
-        # If response is not JSON, return as is
         return response_body
 
-# Handling user input and responses
+# -------------------------------------------------------------------
+# Input area
+# -------------------------------------------------------------------
+prompt = st.text_input("Please enter your query?", max_chars=2000)
+prompt = prompt.strip()
+
+submit_button = st.button("Submit", type="primary")
+end_session_button = st.button("End Session")
+
+# -------------------------------------------------------------------
+# Handle submit
+# -------------------------------------------------------------------
 if submit_button and prompt:
     if not agent_id or not agent_alias_id:
         st.error("Please enter your Agent ID and Agent Alias ID in the sidebar before submitting a query.")
@@ -84,46 +133,48 @@ if submit_button and prompt:
             "agentAliasId": agent_alias_id
         }
         response = agenthelper.lambda_handler(event, None)
-        
+
+        trace_raw = ""
+        the_response = ""
+
         try:
-            # Parse the JSON string
             if response and 'body' in response and response['body']:
                 response_data = json.loads(response['body'])
-                print("TRACE & RESPONSE DATA ->  ", response_data)
             else:
-                print("Invalid or empty response received")
-        except json.JSONDecodeError as e:
-            print("JSON decoding error:", e)
-            response_data = None 
-        
+                response_data = None
+        except json.JSONDecodeError:
+            response_data = None
+
         try:
-            # Check if response_data is None or contains error
             if response_data is None:
-                all_data = "No response data"
+                trace_raw = "No response data"
                 the_response = "Failed to get response from agent"
             elif 'error' in response_data:
-                all_data = "Error occurred"
+                trace_raw = "Error occurred"
                 the_response = f"Agent error: {response_data['error']}"
             elif 'response' in response_data and 'trace_data' in response_data:
-                # Extract the response and trace data
-                all_data = format_response(response_data['response'])
+                trace_raw = format_response(response_data['response'])
                 the_response = response_data['trace_data']
             else:
-                all_data = f"Unexpected response format: {list(response_data.keys()) if response_data else 'None'}"
-                the_response = f"Response data: {response_data}"
+                trace_raw = str(response_data)
+                the_response = "Unexpected response format"
         except Exception as e:
-            print(f"Error extracting response data: {e}")
-            print(f"Response data: {response_data}")
-            print(f"Full response: {response}")
-            all_data = "..." 
-            the_response = f"Error occurred: {str(e)}" 
+            trace_raw = "..."
+            the_response = f"Error occurred: {str(e)}"
 
-        # Use trace_data and formatted_response as needed
-        st.sidebar.text_area("", value=all_data, height=300)
+        # Display cleaned trace data in sidebar
+        if isinstance(trace_raw, str):
+            cleaned_trace = clean_trace_data(trace_raw)
+            st.sidebar.text_area("Latest Trace", value=cleaned_trace, height=300)
+        else:
+            st.sidebar.dataframe(trace_raw)
+
+        # Add to history (newest will be rendered first)
         st.session_state['history'].append({"question": prompt, "answer": the_response})
-        st.session_state['trace_data'] = the_response
-  
 
+# -------------------------------------------------------------------
+# Handle end session
+# -------------------------------------------------------------------
 if end_session_button:
     st.session_state['history'].append({"question": "Session Ended", "answer": "Thank you for using AnyCompany Support Agent!"})
     event = {
@@ -136,75 +187,55 @@ if end_session_button:
     agenthelper.lambda_handler(event, None)
     st.session_state['history'].clear()
 
-# Display conversation history
+# -------------------------------------------------------------------
+# Conversation History (newest first)
+# -------------------------------------------------------------------
 st.write("## Conversation History")
 
-# Load images outside the loop to optimize performance
-import pathlib
-_app_dir = pathlib.Path(__file__).parent
-human_image = Image.open(_app_dir / 'human_face.png')
-robot_image = Image.open(_app_dir / 'robot_face.jpg')
-circular_human_image = crop_to_circle(human_image)
-circular_robot_image = crop_to_circle(robot_image)
-
 for index, chat in enumerate(reversed(st.session_state['history'])):
-    # Creating columns for Question
-    col1_q, col2_q = st.columns([2, 10])
+    # Question
+    col1_q, col2_q = st.columns([1, 11])
     with col1_q:
-        st.image(circular_human_image, width=125)
+        st.image(circular_human_image, width=50)
     with col2_q:
-        # Generate a unique key for each question text area
-        st.text_area("Q:", value=chat["question"], height=68, key=f"question_{index}", disabled=True)
+        st.markdown(f"**You:** {chat['question']}")
 
-    # Creating columns for Answer
-    col1_a, col2_a = st.columns([2, 10])
+    # Answer
+    col1_a, col2_a = st.columns([1, 11])
     if isinstance(chat["answer"], pd.DataFrame):
         with col1_a:
-            st.image(circular_robot_image, width=100)
+            st.image(circular_robot_image, width=50)
         with col2_a:
-            # Generate a unique key for each answer dataframe
             st.dataframe(chat["answer"], key=f"answer_df_{index}")
     else:
         with col1_a:
-            st.image(circular_robot_image, width=150)
+            st.image(circular_robot_image, width=50)
         with col2_a:
-            # Generate a unique key for each answer text area
-            st.text_area("A:", value=chat["answer"], height=100, key=f"answer_{index}")
+            st.markdown(f"**Agent:** {chat['answer']}")
 
-# Example Prompts Section
-st.write("## Test Knowledge Base Prompts")
+    st.divider()
 
-# Creating a list of prompts for the Knowledge Base section
-knowledge_base_prompts = [
-    {"Prompt": "Give me a summary of financial market developments and open market operations in January 2023"},
-    {"Prompt": "Tell me the participants view on economic conditions and economic outlook"},
-    {"Prompt": "Provide any important information I should know about consumer inflation, or rising prices"},
-    {"Prompt": "Tell me about the Staff Review of the Economic & financial Situation"}
-]
+# -------------------------------------------------------------------
+# Example Prompts
+# -------------------------------------------------------------------
+with st.expander("Example Prompts", expanded=False):
+    st.write("### Knowledge Base Prompts")
+    st.table([
+        {"Prompt": "Give me a summary of financial market developments and open market operations in January 2023"},
+        {"Prompt": "Tell me the participants view on economic conditions and economic outlook"},
+        {"Prompt": "Provide any important information I should know about consumer inflation, or rising prices"},
+        {"Prompt": "Tell me about the Staff Review of the Economic & financial Situation"}
+    ])
 
-# Displaying the Knowledge Base prompts as a table
-st.table(knowledge_base_prompts)
+    st.write("### Action Group Prompts")
+    st.table([
+        {"Prompt": "Create a portfolio with 3 companies in the real estate industry"},
+        {"Prompt": "Create a portfolio of 4 companies that are in the technology industry"},
+        {"Prompt": "Return me information on the company on TechStashNova Inc."}
+    ])
 
-# Test Action Group Prompts
-st.write("## Test Action Group Prompts")
-
-# Creating a list of prompts for the Action Group section
-action_group_prompts = [
-    {"Prompt": "Create a portfolio with 3 companies in the real estate industry"},
-    {"Prompt": "Create a portfolio of 4 companies that are in the technology industry"},
-    {"Prompt": "Return me information on the company on TechStashNova Inc."}
-]
-
-# Displaying the Action Group prompts as a table
-st.table(action_group_prompts)
-
-st.write("## Test KB, AG, History Prompt")
-
-# Creating a list of prompts for the specific task
-task_prompts = [
-    {"Task": "Send an email to test@example.com that includes the summary and portfolio report.", 
-     "Note": "The logic for this method is not implemented to send emails"}
-]
-
-# Displaying the task prompt as a table
-st.table(task_prompts)
+    st.write("### KB + AG + Email Prompt")
+    st.table([
+        {"Task": "Send an email to test@example.com that includes the summary and portfolio report.",
+         "Note": "The logic for this method is not implemented to send emails"}
+    ])
