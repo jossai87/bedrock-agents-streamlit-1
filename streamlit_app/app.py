@@ -53,9 +53,23 @@ if not agent_id or not agent_alias_id:
 st.sidebar.markdown("---")
 st.sidebar.title("Trace Data")
 
+# Full-screen trace dialog
+@st.dialog("Trace Data", width="large")
+def show_full_trace():
+    trace = st.session_state.get('last_trace', 'No trace data yet.')
+    if isinstance(trace, pd.DataFrame):
+        st.dataframe(trace, use_container_width=True)
+    else:
+        st.code(trace, language=None)
+
+if st.sidebar.button("Expand Full View"):
+    show_full_trace()
+
 # Session State Management
 if 'history' not in st.session_state:
     st.session_state['history'] = []
+if 'last_trace' not in st.session_state:
+    st.session_state['last_trace'] = ""
 
 # -------------------------------------------------------------------
 # Helper: Clean up raw trace data for display
@@ -162,11 +176,13 @@ if submit_button and prompt:
             trace_raw = "..."
             the_response = f"Error occurred: {str(e)}"
 
-        # Display cleaned trace data in sidebar
+        # Display cleaned trace data in sidebar and store for full view
         if isinstance(trace_raw, str):
             cleaned_trace = clean_trace_data(trace_raw)
-            st.sidebar.text_area("Latest Trace", value=cleaned_trace, height=300)
+            st.session_state['last_trace'] = cleaned_trace
+            st.sidebar.text_area("", value=cleaned_trace, height=300, label_visibility="collapsed")
         else:
+            st.session_state['last_trace'] = trace_raw
             st.sidebar.dataframe(trace_raw)
 
         # Add to history (newest will be rendered first)
