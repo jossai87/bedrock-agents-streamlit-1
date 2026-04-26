@@ -31,39 +31,62 @@ circular_robot_image = crop_to_circle(robot_image)
 st.title("Co. Portfolio Creator")
 
 # -------------------------------------------------------------------
-# Sidebar: Agent Configuration
+# Sidebar: Tabs for Configuration, Example Prompts, Trace Data
 # -------------------------------------------------------------------
-st.sidebar.title("Agent Configuration")
+sidebar_tab1, sidebar_tab2, sidebar_tab3 = st.sidebar.tabs(["⚙️ Config", "💡 Prompts", "📊 Trace"])
 
-if 'agent_id' not in st.session_state:
-    st.session_state['agent_id'] = ""
-if 'agent_alias_id' not in st.session_state:
-    st.session_state['agent_alias_id'] = ""
+# --- Tab 1: Agent Configuration ---
+with sidebar_tab1:
+    if 'agent_id' not in st.session_state:
+        st.session_state['agent_id'] = ""
+    if 'agent_alias_id' not in st.session_state:
+        st.session_state['agent_alias_id'] = ""
 
-agent_id = st.sidebar.text_input("Agent ID", value=st.session_state['agent_id'], placeholder="e.g. ABCDEF1234")
-agent_alias_id = st.sidebar.text_input("Agent Alias ID", value=st.session_state['agent_alias_id'], placeholder="e.g. ZYXWVU9876")
+    agent_id = st.text_input("Agent ID", value=st.session_state['agent_id'], placeholder="e.g. ABCDEF1234")
+    agent_alias_id = st.text_input("Agent Alias ID", value=st.session_state['agent_alias_id'], placeholder="e.g. ZYXWVU9876")
 
-st.session_state['agent_id'] = agent_id
-st.session_state['agent_alias_id'] = agent_alias_id
+    st.session_state['agent_id'] = agent_id
+    st.session_state['agent_alias_id'] = agent_alias_id
 
 if not agent_id or not agent_alias_id:
     st.warning("Please enter your **Agent ID** and **Agent Alias ID** in the sidebar to get started.")
 
-# Sidebar: Trace Data (below the config)
-st.sidebar.markdown("---")
-st.sidebar.title("Trace Data")
+# --- Tab 2: Example Prompts ---
+with sidebar_tab2:
+    st.markdown("**Knowledge Base**")
+    st.markdown("""
+- Give me a summary of financial market developments and open market operations in January 2023
+- Tell me the participants view on economic conditions and economic outlook
+- Provide any important information I should know about consumer inflation, or rising prices
+- Tell me about the Staff Review of the Economic & financial Situation
+    """)
 
-# Full-screen trace dialog
-@st.dialog("Trace Data", width="large")
-def show_full_trace():
-    trace = st.session_state.get('last_trace', 'No trace data yet.')
-    if isinstance(trace, pd.DataFrame):
-        st.dataframe(trace, use_container_width=True)
-    else:
-        st.code(trace, language=None)
+    st.markdown("**Action Group**")
+    st.markdown("""
+- Create a portfolio with 3 companies in the real estate industry
+- Create a portfolio of 4 companies that are in the technology industry
+- Return me information on the company on TechStashNova Inc.
+    """)
 
-if st.sidebar.button("Expand Full View"):
-    show_full_trace()
+    st.markdown("**KB + AG + Email**")
+    st.markdown("""
+- Send an email to test@example.com that includes the summary and portfolio report
+    """)
+    st.caption("Note: Replace with your verified SES email address")
+
+# --- Tab 3: Trace Data ---
+with sidebar_tab3:
+    # Full-screen trace dialog
+    @st.dialog("Trace Data", width="large")
+    def show_full_trace():
+        trace = st.session_state.get('last_trace', 'No trace data yet.')
+        if isinstance(trace, pd.DataFrame):
+            st.dataframe(trace, use_container_width=True)
+        else:
+            st.code(trace, language=None)
+
+    if st.button("Expand Full View"):
+        show_full_trace()
 
 # Session State Management
 if 'history' not in st.session_state:
@@ -180,10 +203,12 @@ if submit_button and prompt:
         if isinstance(trace_raw, str):
             cleaned_trace = clean_trace_data(trace_raw)
             st.session_state['last_trace'] = cleaned_trace
-            st.sidebar.text_area("", value=cleaned_trace, height=300, label_visibility="collapsed")
+            with sidebar_tab3:
+                st.text_area("", value=cleaned_trace, height=300, label_visibility="collapsed")
         else:
             st.session_state['last_trace'] = trace_raw
-            st.sidebar.dataframe(trace_raw)
+            with sidebar_tab3:
+                st.dataframe(trace_raw)
 
         # Add to history (newest will be rendered first)
         st.session_state['history'].append({"question": prompt, "answer": the_response})
@@ -230,28 +255,3 @@ for index, chat in enumerate(reversed(st.session_state['history'])):
             st.text_area("Agent response", value=chat['answer'], height=150, key=f"answer_{index}", disabled=True, label_visibility="collapsed")
 
     st.divider()
-
-# -------------------------------------------------------------------
-# Example Prompts
-# -------------------------------------------------------------------
-with st.expander("Example Prompts", expanded=False):
-    st.write("### Knowledge Base Prompts")
-    st.table([
-        {"Prompt": "Give me a summary of financial market developments and open market operations in January 2023"},
-        {"Prompt": "Tell me the participants view on economic conditions and economic outlook"},
-        {"Prompt": "Provide any important information I should know about consumer inflation, or rising prices"},
-        {"Prompt": "Tell me about the Staff Review of the Economic & financial Situation"}
-    ])
-
-    st.write("### Action Group Prompts")
-    st.table([
-        {"Prompt": "Create a portfolio with 3 companies in the real estate industry"},
-        {"Prompt": "Create a portfolio of 4 companies that are in the technology industry"},
-        {"Prompt": "Return me information on the company on TechStashNova Inc."}
-    ])
-
-    st.write("### KB + AG + Email Prompt")
-    st.table([
-        {"Task": "Send an email to test@example.com that includes the summary and portfolio report.",
-         "Note": "The logic for this method is not implemented to send emails"}
-    ])
