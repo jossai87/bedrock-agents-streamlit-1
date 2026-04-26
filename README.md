@@ -30,7 +30,7 @@ Alternatively, this README will walk you through the step-by-step process to set
 
 ## Prerequisites
 - An active AWS Account.
-- Familiarity with AWS services like Amazon Bedrock, S3, Lambda, and Cloud9.
+- Familiarity with AWS services like Amazon Bedrock, S3, and Lambda.
 
 ## Diagram
 
