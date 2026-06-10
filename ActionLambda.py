@@ -57,7 +57,7 @@ def lambda_handler(event, context):
         '''Sends an email using Amazon SES with a summary report and portfolio details'''
         # Get parameters from event
         emailAddress = get_named_parameter(event, 'emailAddress')
-        fomcSummary = get_named_parameter(event, 'fomcSummary')
+        fomcSummary = next((item['value'] for item in event['parameters'] if item['name'] == 'fomcSummary'), "")
         portfolioDataString = get_named_parameter(event, 'portfolio')
         
         # Format portfolio data for display

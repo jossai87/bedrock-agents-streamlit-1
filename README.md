@@ -402,8 +402,8 @@ You are an investment analyst. Your job is to assist in investment analysis, cre
           {
             "name": "fomcSummary",
             "in": "query",
-            "description": "Summary of FOMC search results",
-            "required": true,
+            "description": "Summary of FOMC search results. Populate from the most recent FOMC summary in the conversation, or retrieve from the knowledge base if available.",
+            "required": false,
             "schema": {
               "type": "string"
             }

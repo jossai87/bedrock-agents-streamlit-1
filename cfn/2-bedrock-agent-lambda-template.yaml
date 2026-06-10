@@ -150,7 +150,7 @@ Resources:
                   '''Sends an email using Amazon SES with a summary report and portfolio details'''
                   # Get parameters from event
                   emailAddress = get_named_parameter(event, 'emailAddress')
-                  fomcSummary = get_named_parameter(event, 'fomcSummary')
+                  fomcSummary = next((item['value'] for item in event['parameters'] if item['name'] == 'fomcSummary'), "")
                   portfolioDataString = get_named_parameter(event, 'portfolio')
                   
                   # Create the email content
@@ -385,8 +385,8 @@ Resources:
                         {
                           "name": "fomcSummary",
                           "in": "query",
-                          "description": "Summary of FOMC search results",
-                          "required": true,
+                          "description": "Summary of FOMC search results. Populate from the most recent FOMC summary in the conversation, or retrieve from the knowledge base if available.",
+                          "required": false,
                           "schema": {
                             "type": "string"
                           }
