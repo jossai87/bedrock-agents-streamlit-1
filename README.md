@@ -86,7 +86,7 @@ Alternatively, this README will walk you through the step-by-step process to set
 
 ### Step 2: Knowledge Base Setup in Bedrock Agent
 
-- All Amazon Bedrock models are enabled by default. To verify, navigate to the Amazon Bedrock console, then on the left of the screen, scroll down and select **Model access**. Confirm that the **Amazon: Titan Text Embeddings V2** and **Amazon: Nova Lite** models show **Access granted**.
+- All Amazon Bedrock models are enabled by default. To verify, navigate to the Amazon Bedrock console, then on the left of the screen, scroll down and select **Model access**. Confirm that the **Amazon: Titan Text Embeddings V2** and **Amazon: Nova Pro** models show **Access granted**.
 
 ![Access granted](images/access_granted.png)
 
