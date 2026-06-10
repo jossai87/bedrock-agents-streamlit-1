@@ -1,4 +1,5 @@
 import json
+import re
 import boto3
 from botocore.exceptions import ClientError
 
@@ -61,40 +62,67 @@ def lambda_handler(event, context):
         portfolioDataString = get_named_parameter(event, 'portfolio')
         
         # Format portfolio data for display
+        def _coerce_companies(raw):
+            """Return a list of company dicts from either JSON or the Bedrock
+            object-string format: {companies=[{revenue=80000, companyName=...}]}."""
+            if isinstance(raw, dict):
+                return raw.get('companies', [raw])
+            if isinstance(raw, list):
+                return raw
+            if not isinstance(raw, str):
+                return []
+            # Try strict JSON first
+            try:
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    return data.get('companies', [data])
+                if isinstance(data, list):
+                    return data
+            except (json.JSONDecodeError, ValueError):
+                pass
+            # Fall back to parsing the Bedrock key=value object-string format
+            companies = []
+            for block in re.findall(r'\{([^{}]*)\}', raw):
+                fields = {}
+                for m in re.finditer(r'(\w+)=(.+?)(?=,\s*\w+=|$)', block):
+                    fields[m.group(1)] = m.group(2).strip()
+                if fields:
+                    companies.append(fields)
+            return companies
+
+        def _money(v):
+            try:
+                return f"${int(float(v)):,}"
+            except (ValueError, TypeError):
+                return str(v)
+
+        companies = _coerce_companies(portfolioDataString)
         portfolio_html = ""
         portfolio_text = ""
-        try:
-            portfolio = json.loads(portfolioDataString) if isinstance(portfolioDataString, str) else portfolioDataString
-            if isinstance(portfolio, list):
-                companies = portfolio
-            elif isinstance(portfolio, dict) and 'companies' in portfolio:
-                companies = portfolio['companies']
-            else:
-                companies = [portfolio] if isinstance(portfolio, dict) else []
-            
-            for i, company in enumerate(companies, 1):
-                name = company.get('companyName', company.get('name', 'N/A'))
-                revenue = company.get('revenue', 'N/A')
-                expenses = company.get('expenses', 'N/A')
-                profit = company.get('profit', 'N/A')
-                employees = company.get('employees', 'N/A')
-                
-                portfolio_text += (f"  {i}. {name}\n"
-                                   f"     Revenue: ${revenue:,}\n"
-                                   f"     Expenses: ${expenses:,}\n"
-                                   f"     Profit: ${profit:,}\n"
-                                   f"     Employees: {employees}\n\n")
-                
-                portfolio_html += f"""
+        for i, company in enumerate(companies, 1):
+            name = company.get('companyName', company.get('name', 'N/A'))
+            revenue = _money(company.get('revenue', 'N/A'))
+            expenses = _money(company.get('expenses', 'N/A'))
+            profit = _money(company.get('profit', 'N/A'))
+            employees = company.get('employees', 'N/A')
+
+            portfolio_text += (f"  {i}. {name}\n"
+                               f"     Revenue: {revenue}\n"
+                               f"     Expenses: {expenses}\n"
+                               f"     Profit: {profit}\n"
+                               f"     Employees: {employees}\n\n")
+
+            portfolio_html += f"""
                 <tr>
                     <td style="padding: 8px; border: 1px solid #ddd;">{i}</td>
                     <td style="padding: 8px; border: 1px solid #ddd;">{name}</td>
-                    <td style="padding: 8px; border: 1px solid #ddd;">${revenue:,}</td>
-                    <td style="padding: 8px; border: 1px solid #ddd;">${expenses:,}</td>
-                    <td style="padding: 8px; border: 1px solid #ddd;">${profit:,}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{revenue}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{expenses}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{profit}</td>
                     <td style="padding: 8px; border: 1px solid #ddd;">{employees}</td>
                 </tr>"""
-        except (json.JSONDecodeError, TypeError, ValueError):
+
+        if not companies:
             portfolio_text = str(portfolioDataString)
             portfolio_html = f"<p>{portfolioDataString}</p>"
         
